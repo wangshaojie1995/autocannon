@@ -7,8 +7,6 @@ const server = http.createServer(handle)
 
 server.listen(0, startBench)
 
-let connection = 0
-
 function handle (req, res) {
   res.end('hello world')
 }
@@ -20,11 +18,11 @@ function startBench () {
     url,
     connections: 1000,
     duration: 10,
-    setupClient
+    verifyBody
   }, finishedBench)
 
-  function setupClient (client) {
-    client.setBody('connection number', connection++)
+  function verifyBody (body) {
+    return body.indexOf('<html>') > -1
   }
 
   function finishedBench (err, res) {

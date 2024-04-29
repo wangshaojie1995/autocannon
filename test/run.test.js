@@ -255,7 +255,7 @@ test('run should handle context correctly', (t) => {
     initialContext: { init: 'context' },
     requests: [{
       setupRequest: (req, context) => {
-        t.deepEqual(context, { init: 'context' }, 'context should be initialized from opts')
+        t.same(context, { init: 'context' }, 'context should be initialized from opts')
         return req
       }
     }]
@@ -319,6 +319,42 @@ test('run should produce 0 mismatches with expectBody set and matches', (t) => {
   initJob({
     url: 'http://localhost:' + server.address().port,
     expectBody: responseBody,
+    maxOverallRequests: 10
+  }, function (err, result) {
+    t.error(err)
+    t.equal(result.mismatches, 0)
+    t.end()
+  })
+})
+
+test('run should produce count of mismatches with verifyBody set', (t) => {
+  t.plan(2)
+
+  initJob({
+    url: 'http://localhost:' + server.address().port,
+    verifyBody: function () {
+      return false
+    },
+    maxOverallRequests: 10,
+    timeout: 100
+  }, function (err, result) {
+    t.error(err)
+    t.equal(result.mismatches, 10)
+    t.end()
+  })
+})
+
+test('run should produce 0 mismatches with verifyBody set and return true', (t) => {
+  t.plan(2)
+
+  const responseBody = 'hello dave'
+  const server = helper.startServer({ body: responseBody })
+
+  initJob({
+    url: 'http://localhost:' + server.address().port,
+    verifyBody: function (body) {
+      return body.indexOf('hello') > -1
+    },
     maxOverallRequests: 10
   }, function (err, result) {
     t.error(err)
@@ -414,7 +450,7 @@ test('run should not modify default options', (t) => {
     duration: 2
   }, function (err, result) {
     t.error(err)
-    t.deepEqual(defaultOptions, origin, 'calling run function does not modify default options')
+    t.same(defaultOptions, origin, 'calling run function does not modify default options')
     t.end()
   })
 })
@@ -524,7 +560,7 @@ test('tracker will emit reqMismatch when body does not match expectBody', (t) =>
 
   tracker.once('reqMismatch', (bodyStr) => {
     t.equal(bodyStr, responseBody)
-    t.notEqual(bodyStr, expectBody)
+    t.not(bodyStr, expectBody)
     tracker.stop()
   })
 })
@@ -637,7 +673,7 @@ test('should throw if duration is not a number nor a string', t => {
       t.fail()
     })
     .catch((err) => {
-      t.is(err.message, 'duration entered was in an invalid format')
+      t.equal(err.message, 'duration entered was in an invalid format')
     })
 })
 
@@ -658,7 +694,7 @@ test('should emit error', t => {
   })
 
   tracker.once('error', (error) => {
-    t.is(error.message, 'A \'type\' key with value \'text\' or \'file\' should be specified')
+    t.equal(error.message, 'A \'type\' key with value \'text\' or \'file\' should be specified')
     t.end()
   })
 })
@@ -676,7 +712,7 @@ test('should throw if timeout is less than zero', t => {
       t.fail()
     })
     .catch((err) => {
-      t.is(err.message, 'timeout must be greater than 0')
+      t.equal(err.message, 'timeout must be greater than 0')
     })
 })
 
@@ -710,7 +746,7 @@ test('should count resets', t => {
       }
     ]
   }).then((result) => {
-    t.is(result.resets, 4)
+    t.equal(result.resets, 4)
     t.end()
   })
 })
@@ -871,4 +907,95 @@ test('should throw on invalid HAR', (t) => {
     t.match(err, /Could not parse HAR content: no entries found/)
     t.end()
   })
+})
+
+test('should run when no callback is passed in', (t) => {
+  t.plan(1)
+
+  const tracker = initJob({
+    url: 'http://localhost:' + server.address().port,
+    connections: 1,
+    duration: 1
+  })
+  t.resolveMatch(tracker, { connections: 1 }, 'The main tracker should resolve')
+})
+
+test('Should run a warmup if one is passed in', (t) => {
+  t.plan(1)
+
+  const tracker = initJob({
+    url: 'http://localhost:' + server.address().port,
+    connections: 1,
+    duration: 1,
+    warmup: {
+      connections: 1,
+      duration: 1
+    }
+  })
+  t.resolves(tracker, 'The main tracker should resolve')
+})
+
+test('The warmup should not pollute the main result set', (t) => {
+  t.plan(3)
+
+  const tracker = initJob({
+    url: 'http://localhost:' + server.address().port,
+    connections: 3,
+    duration: 1,
+    warmup: {
+      connections: 4,
+      duration: 2
+    }
+  })
+  tracker.then((result) => {
+    t.equal(result.connections, 3, 'connections should equal the main connections and not the warmup connections')
+    t.ok(result.duration >= 1, 'duration should equal the main duration and not the warmup duration')
+    t.type(result.warmup, 'object')
+  })
+})
+
+test('should get headers passed from server onResponse callback', async t => {
+  t.plan(3)
+  const server = helper.startServer({ responses: [{ statusCode: 200, body: 'ok', headers: { 'set-cookie': 123 } }] })
+
+  await initJob({
+    url: 'http://localhost:' + server.address().port,
+    connections: 1,
+    amount: 1,
+    requests: [
+      {
+        method: 'GET',
+        onResponse (status, body, context, headers) {
+          t.same(status, 200)
+          t.same(body, 'ok')
+          t.same(headers['set-cookie'], 123)
+        }
+      }
+    ]
+  })
+
+  t.end()
+})
+
+test('should get multi-value headers passed from server onResponse callback', async t => {
+  t.plan(3)
+  const server = helper.startServer({ responses: [{ statusCode: 200, body: 'ok', headers: { 'set-cookie': [123, 456, 789] } }] })
+
+  await initJob({
+    url: 'http://localhost:' + server.address().port,
+    connections: 1,
+    amount: 1,
+    requests: [
+      {
+        method: 'GET',
+        onResponse (status, body, context, headers) {
+          t.same(status, 200)
+          t.same(body, 'ok')
+          t.same(headers['set-cookie'], [123, 456, 789])
+        }
+      }
+    ]
+  })
+
+  t.end()
 })

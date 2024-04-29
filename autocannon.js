@@ -3,7 +3,6 @@
 'use strict'
 
 const crossArgv = require('cross-argv')
-const minimist = require('minimist')
 const fs = require('fs')
 const os = require('os')
 const net = require('net')
@@ -12,12 +11,15 @@ const URL = require('url').URL
 const spawn = require('child_process').spawn
 const managePath = require('manage-path')
 const hasAsyncHooks = require('has-async-hooks')
-const help = fs.readFileSync(path.join(__dirname, 'help.txt'), 'utf8')
+const subarg = require('subarg')
 const printResult = require('./lib/printResult')
 const initJob = require('./lib/init')
 const track = require('./lib/progressTracker')
+const generateSubArgAliases = require('./lib/subargAliases')
 const { checkURL, ofURL } = require('./lib/url')
 const { parseHAR } = require('./lib/parseHAR')
+const _aggregateResult = require('./lib/aggregateResult')
+const validateOpts = require('./lib/validate')
 
 if (typeof URL !== 'function') {
   console.error('autocannon requires the WHATWG URL API, but it is not available. Please upgrade to Node 6.13+.')
@@ -30,63 +32,86 @@ module.exports.track = track
 module.exports.start = start
 module.exports.printResult = printResult
 module.exports.parseArguments = parseArguments
+module.exports.aggregateResult = function aggregateResult (results, opts = {}) {
+  if (!Array.isArray(results)) {
+    throw new Error('"results" must be an array of results')
+  }
+
+  opts = validateOpts(opts, false)
+
+  if (opts instanceof Error) {
+    throw opts
+  }
+
+  return _aggregateResult(results, opts)
+}
+const alias = {
+  connections: 'c',
+  pipelining: 'p',
+  timeout: 't',
+  duration: 'd',
+  sampleInt: 'L',
+  amount: 'a',
+  json: 'j',
+  renderLatencyTable: ['l', 'latency'],
+  onPort: 'on-port',
+  method: 'm',
+  headers: ['H', 'header'],
+  body: 'b',
+  form: 'F',
+  servername: 's',
+  bailout: 'B',
+  input: 'i',
+  maxConnectionRequests: 'M',
+  maxOverallRequests: 'O',
+  connectionRate: 'r',
+  overallRate: 'R',
+  ignoreCoordinatedOmission: 'C',
+  reconnectRate: 'D',
+  renderProgressBar: 'progress',
+  renderStatusCodes: 'statusCodes',
+  title: 'T',
+  verbose: 'V',
+  version: 'v',
+  forever: 'f',
+  idReplacement: 'I',
+  socketPath: 'S',
+  excludeErrorStats: 'x',
+  expectBody: 'E',
+  workers: 'w',
+  warmup: 'W',
+  help: 'h'
+}
+
+const defaults = {
+  connections: 10,
+  timeout: 10,
+  pipelining: 1,
+  duration: 10,
+  sampleInt: 1000,
+  reconnectRate: 0,
+  renderLatencyTable: false,
+  renderProgressBar: true,
+  renderStatusCodes: false,
+  json: false,
+  forever: false,
+  method: 'GET',
+  idReplacement: false,
+  excludeErrorStats: false,
+  debug: false,
+  workers: 0,
+  verbose: true
+}
 
 function parseArguments (argvs) {
-  const argv = minimist(argvs, {
-    boolean: ['json', 'n', 'help', 'renderLatencyTable', 'renderProgressBar', 'renderStatusCodes', 'forever', 'idReplacement', 'excludeErrorStats', 'onPort', 'debug', 'ignoreCoordinatedOmission'],
-    alias: {
-      connections: 'c',
-      pipelining: 'p',
-      timeout: 't',
-      duration: 'd',
-      amount: 'a',
-      json: 'j',
-      renderLatencyTable: ['l', 'latency'],
-      onPort: 'on-port',
-      method: 'm',
-      headers: ['H', 'header'],
-      body: 'b',
-      form: 'F',
-      servername: 's',
-      bailout: 'B',
-      input: 'i',
-      maxConnectionRequests: 'M',
-      maxOverallRequests: 'O',
-      connectionRate: 'r',
-      overallRate: 'R',
-      ignoreCoordinatedOmission: 'C',
-      reconnectRate: 'D',
-      renderProgressBar: 'progress',
-      renderStatusCodes: 'statusCodes',
-      title: 'T',
-      version: 'v',
-      forever: 'f',
-      idReplacement: 'I',
-      socketPath: 'S',
-      excludeErrorStats: 'x',
-      expectBody: 'E',
-      workers: 'w',
-      help: 'h'
-    },
-    default: {
-      connections: 10,
-      timeout: 10,
-      pipelining: 1,
-      duration: 10,
-      reconnectRate: 0,
-      renderLatencyTable: false,
-      renderProgressBar: true,
-      renderStatusCodes: false,
-      json: false,
-      forever: false,
-      method: 'GET',
-      idReplacement: false,
-      excludeErrorStats: false,
-      debug: false,
-      workers: 0
-    },
+  let argv = subarg(argvs, {
+    boolean: ['json', 'n', 'help', 'renderLatencyTable', 'renderProgressBar', 'renderStatusCodes', 'forever', 'idReplacement', 'excludeErrorStats', 'onPort', 'debug', 'ignoreCoordinatedOmission', 'verbose'],
+    alias,
+    default: defaults,
     '--': true
   })
+  // subarg does not convert aliases in sub arguments
+  argv = generateSubArgAliases(argv)
 
   argv.url = argv._.length > 1 ? argv._ : argv._[0]
 
@@ -108,6 +133,7 @@ function parseArguments (argvs) {
   }
 
   if (!checkURL(argv.url) || argv.help) {
+    const help = fs.readFileSync(path.join(__dirname, 'help.txt'), 'utf8')
     console.error(help)
     return
   }
@@ -147,7 +173,7 @@ function parseArguments (argvs) {
   })
 
   if (argv.input) {
-    argv.body = fs.readFileSync(argv.input)
+    argv.body = fs.readFileSync(argv.input, 'utf8')
   }
 
   if (argv.headers) {
@@ -160,7 +186,7 @@ function parseArguments (argvs) {
       const equalIndex = header.indexOf('=')
       const index = Math.min(colonIndex < 0 ? Infinity : colonIndex, equalIndex < 0 ? Infinity : equalIndex)
       if (Number.isFinite(index) && index > 0) {
-        obj[header.slice(0, index)] = header.slice(index + 1).trim()
+        obj[header.slice(0, index)] = header.slice(index + 1)
         return obj
       } else throw new Error(`An HTTP header was not correctly formatted: ${header}`)
     }, {})
@@ -182,8 +208,40 @@ function parseArguments (argvs) {
     }
   }
 
+  argv.tlsOptions = {}
+
+  if (argv.cert) {
+    try {
+      argv.tlsOptions.cert = fs.readFileSync(argv.cert)
+    } catch (err) {
+      throw new Error(`Failed to load cert file: ${err.message}`)
+    }
+  }
+
+  if (argv.key) {
+    try {
+      argv.tlsOptions.key = fs.readFileSync(argv.key)
+    } catch (err) {
+      throw new Error(`Failed to load key file: ${err.message}`)
+    }
+  }
+
+  if (argv.ca) {
+    if (typeof argv.ca === 'string') {
+      argv.ca = [argv.ca]
+    } else if (Array.isArray(argv.ca._)) {
+      argv.ca = argv.ca._
+    }
+
+    try {
+      argv.tlsOptions.ca = argv.ca.map(caPath => fs.readFileSync(caPath))
+    } catch (err) {
+      throw new Error(`Failed to load ca file: ${err.message}`)
+    }
+  }
+
   // This is to distinguish down the line whether it is
-  // run via command-line or programatically
+  // run via command-line or programmatically
   argv[Symbol.for('internal')] = true
 
   return argv
@@ -205,7 +263,7 @@ function start (argv) {
       const url = new URL(argv.url, `http://localhost:${port}`).href
       const opts = Object.assign({}, argv, {
         onPort: false,
-        url: url
+        url
       })
       const tracker = initJob(opts, () => {
         proc.kill('SIGINT')
@@ -232,9 +290,17 @@ function start (argv) {
       })
     })
   } else {
-    initJob(argv).catch((err) => {
+    // if forever is true then a promise is not returned and we need to try ... catch errors
+    try {
+      const tracker = initJob(argv)
+      if (tracker.then) {
+        tracker.catch((err) => {
+          console.error(err.message)
+        })
+      }
+    } catch (err) {
       console.error(err.message)
-    })
+    }
   }
 }
 

@@ -1,14 +1,16 @@
 'use strict'
 
 const path = require('path')
+const fs = require('fs')
 const test = require('tap').test
 const http = require('http')
 const initJob = require('../lib/init')
 const { hasWorkerSupport } = require('../lib/util')
 const helper = require('./helper')
-const server = helper.startServer()
+const httpsServer = helper.startHttpsServer()
 
 test('returns error when no worker support was found', (t) => {
+  const server = helper.startServer()
   initJob({
     url: 'http://localhost:' + server.address().port,
     connections: 3,
@@ -27,6 +29,7 @@ test('returns error when no worker support was found', (t) => {
 })
 
 test('init with workers', { skip: !hasWorkerSupport }, (t) => {
+  const server = helper.startServer()
   initJob({
     url: 'http://localhost:' + server.address().port,
     connections: 3,
@@ -133,6 +136,36 @@ test('setupRequest and onResponse work with workers', { skip: !hasWorkerSupport 
   })
 })
 
+test('verifyBody work with workers', { skip: !hasWorkerSupport }, (t) => {
+  const server = http.createServer((req, res) => {
+    // it's not easy to assert things within setupRequest and onResponse
+    // when in workers mode. So, we set something in onResponse and use in the
+    // next Request and make sure it exist or we return 404.
+    if (req.method === 'GET' && req.url !== '/test-123?some=thing&bar=baz') {
+      res.statusCode = 404
+      res.end('NOT OK')
+      return
+    }
+
+    res.end('OK')
+  })
+  server.listen(0)
+  server.unref()
+
+  initJob({
+    url: 'http://localhost:' + server.address().port,
+    connections: 2,
+    amount: 4,
+    workers: 1,
+    verifyBody: path.join(__dirname, './utils/verify-body')
+  }, function (err, result) {
+    t.error(err)
+
+    t.equal(4, result.mismatches, 'should have 4 mismatches requests')
+    t.end()
+  })
+})
+
 test('setupClient works with workers', { skip: !hasWorkerSupport }, (t) => {
   const server = http.createServer((req, res) => {
     if (req.headers.custom !== 'my-header') {
@@ -156,6 +189,23 @@ test('setupClient works with workers', { skip: !hasWorkerSupport }, (t) => {
 
     t.equal(2, result['2xx'], 'should have 2 ok requests')
     t.equal(0, result['4xx'], 'should not have any 404s')
+    t.end()
+  })
+})
+
+test('tlsOptions using pfx work as intended in workers', { skip: !hasWorkerSupport }, (t) => {
+  initJob({
+    url: 'https://localhost:' + httpsServer.address().port,
+    connections: 1,
+    amount: 1,
+    workers: 2,
+    tlsOptions: {
+      pfx: fs.readFileSync(path.join(__dirname, '/keystore.pkcs12')),
+      passphrase: 'test'
+    }
+  }, function (err, result) {
+    t.error(err)
+    t.ok(result, 'requests are ok')
     t.end()
   })
 })

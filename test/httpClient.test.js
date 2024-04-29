@@ -98,7 +98,7 @@ test('client calls a tls server without SNI servername twice', (t) => {
 
   client.on('headers', (response) => {
     t.equal(response.statusCode, 200, 'status code matches')
-    t.deepEqual(response.headers, ['X-servername', '', 'Content-Length', '0'])
+    t.same(response.headers, ['X-servername', '', 'Content-Length', '0'])
     if (count++ > 0) {
       client.destroy()
     }
@@ -116,7 +116,7 @@ test('client calls a tls server with SNI servername twice', (t) => {
 
   client.on('headers', (response) => {
     t.equal(response.statusCode, 200, 'status code matches')
-    t.deepEqual(response.headers, ['X-servername', opts.servername, 'Content-Length', '0'])
+    t.same(response.headers, ['X-servername', opts.servername, 'Content-Length', '0'])
     if (count++ > 0) {
       client.destroy()
     }
@@ -134,7 +134,7 @@ test('client uses SNI servername from URL hostname by default', (t) => {
 
   client.on('headers', (response) => {
     t.equal(response.statusCode, 200, 'status code matches')
-    t.deepEqual(response.headers, ['X-servername', opts.hostname, 'Content-Length', '0'])
+    t.same(response.headers, ['X-servername', opts.hostname, 'Content-Length', '0'])
     if (count++ > 0) {
       client.destroy()
     }
@@ -153,7 +153,7 @@ test('client prefers SNI servername from opts over URL hostname', (t) => {
 
   client.on('headers', (response) => {
     t.equal(response.statusCode, 200, 'status code matches')
-    t.deepEqual(response.headers, ['X-servername', opts.servername, 'Content-Length', '0'])
+    t.same(response.headers, ['X-servername', opts.servername, 'Content-Length', '0'])
     if (count++ > 0) {
       client.destroy()
     }
@@ -171,7 +171,7 @@ test('client ignores IP address in hostname-derived SNI servername', (t) => {
 
   client.on('headers', (response) => {
     t.equal(response.statusCode, 200, 'status code matches')
-    t.deepEqual(response.headers, ['X-servername', '', 'Content-Length', '0'])
+    t.same(response.headers, ['X-servername', '', 'Content-Length', '0'])
     if (count++ > 0) {
       client.destroy()
     }
@@ -189,7 +189,7 @@ test('client ignores falsy SNI servername', (t) => {
 
   client.on('headers', (response) => {
     t.equal(response.statusCode, 200, 'status code matches')
-    t.deepEqual(response.headers, ['X-servername', '', 'Content-Length', '0'])
+    t.same(response.headers, ['X-servername', '', 'Content-Length', '0'])
     if (count++ > 0) {
       client.destroy()
     }
@@ -211,7 +211,7 @@ test('client passes through tlsOptions to connect', (t) => {
 
   client.on('headers', (response) => {
     t.equal(response.statusCode, 200, 'status code matches')
-    t.deepEqual(response.headers, ['X-servername', '', 'X-email', 'tes@test.com', 'Content-Length', '0'])
+    t.same(response.headers, ['X-servername', '', 'X-email', 'tes@test.com', 'Content-Length', '0'])
     if (count++ > 0) {
       client.destroy()
     }
@@ -287,12 +287,59 @@ test('client supports custom headers', (t) => {
   })
 })
 
+test('client supports custom headers in requests', (t) => {
+  t.plan(2)
+
+  const opts = server.address()
+  opts.requests = [
+    {
+      path: '/',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        foo: 'example'
+      })
+    }
+  ]
+  const client = new Client(opts)
+
+  server.once('request', (req, res) => {
+    t.equal(req.headers['content-type'], 'application/json', 'custom header matches')
+  })
+
+  client.on('response', (statusCode, length) => {
+    t.equal(statusCode, 200, 'status code matches')
+    client.destroy()
+  })
+})
+
 test('client supports host custom header', (t) => {
   t.plan(2)
 
   const opts = server.address()
   opts.headers = {
     host: 'www.autocannon.com'
+  }
+  const client = new Client(opts)
+
+  server.once('request', (req, res) => {
+    t.equal(req.headers.host, 'www.autocannon.com', 'host header matches')
+  })
+
+  client.on('response', (statusCode, length) => {
+    t.equal(statusCode, 200, 'status code matches')
+    client.destroy()
+  })
+})
+
+test('client supports host custom header with mixed case', (t) => {
+  t.plan(2)
+
+  const opts = server.address()
+  opts.headers = {
+    Host: 'www.autocannon.com'
   }
   const client = new Client(opts)
 
@@ -362,7 +409,7 @@ test('client supports sending a body', (t) => {
   server.once('request', (req, res) => {
     req.pipe(bl((err, body) => {
       t.error(err)
-      t.deepEqual(body.toString(), opts.body.toString(), 'body matches')
+      t.same(body.toString(), opts.body.toString(), 'body matches')
     }))
   })
 
@@ -385,13 +432,41 @@ test('client supports sending a body which is a string', (t) => {
   server.once('request', (req, res) => {
     req.pipe(bl((err, body) => {
       t.error(err)
-      t.deepEqual(body.toString(), opts.body, 'body matches')
+      t.same(body.toString(), opts.body, 'body matches')
     }))
   })
 
   client.on('response', (statusCode, length) => {
     t.equal(statusCode, 200, 'status code matches')
     t.ok(length > 'hello world'.length, 'length includes the headers')
+    client.destroy()
+  })
+})
+
+test('client supports sending a body passed on the CLI as JSON array', (t) => {
+  t.plan(3)
+
+  const body = [{ a: [{ b: 1 }] }]
+  const jsonBody = JSON.stringify(body)
+
+  // this odd format is parsed by the subarg parser when body is a JSON array
+  const mangledBody = { _: [JSON.stringify(body[0])] }
+
+  const opts = server.address()
+  opts.method = 'POST'
+  opts.body = mangledBody
+
+  const client = new Client(opts)
+
+  server.once('request', (req, res) => {
+    req.pipe(bl((err, body) => {
+      t.error(err)
+      t.same(body.toString(), jsonBody, 'body matches')
+    }))
+  })
+
+  client.on('response', (statusCode, length) => {
+    t.equal(statusCode, 200, 'status code matches')
     client.destroy()
   })
 })
@@ -718,21 +793,21 @@ test('client exposes response bodies and statuses', (t) => {
     switch (number) {
       case 1:
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, ...opts.requests[0] }), 'first request')
-        t.deepEqual(responses, [{
+        t.same(responses, [{
           status: 200,
           body: 'hello!'
         }])
         break
       case 2:
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, ...opts.requests[1] }), 'second request')
-        t.deepEqual(responses, [{
+        t.same(responses, [{
           status: 200,
           body: 'hello!'
         }])
         break
       case 3:
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, ...opts.requests[2] }), 'third request')
-        t.deepEqual(responses, [{
+        t.same(responses, [{
           status: 200,
           body: 'hello!'
         }, {
@@ -742,7 +817,7 @@ test('client exposes response bodies and statuses', (t) => {
         break
       case 4:
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, ...opts.requests[0] }), 'first request')
-        t.deepEqual(responses, [{
+        t.same(responses, [{
           status: 200,
           body: 'hello!'
         }, {
@@ -771,7 +846,7 @@ test('client keeps context and reset it when looping on requests', (t) => {
       body: 'hello world again',
       onResponse: (status, body, context) => {
         if (number < 3) {
-          t.deepEqual(context, {}, 'context was supposed to be null')
+          t.same(context, {}, 'context was supposed to be null')
           context.previousRes = body
         }
       }
@@ -780,7 +855,7 @@ test('client keeps context and reset it when looping on requests', (t) => {
       method: 'PUT',
       setupRequest: (req, context) => {
         if (number < 3) {
-          t.deepEqual(context, { previousRes: expectedResponse }, 'context was supposed to contain previous response')
+          t.same(context, { previousRes: expectedResponse }, 'context was supposed to contain previous response')
         }
         return Object.assign({}, req, { body: context.previousRes })
       }
@@ -913,22 +988,22 @@ test('client invokes appropriate onResponse when using pipelining', (t) => {
       case 1:
         // 1st & 2nd were sent, receiving 1st
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, method: 'GET' }), 'current should be second request')
-        t.deepEqual(responses, ['POST'])
+        t.same(responses, ['POST'])
         break
       case 2:
         // 3rd was sent as 1st is finished, receiving 2nd
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, method: 'PUT' }), 'current should be third request')
-        t.deepEqual(responses, ['POST', 'GET'])
+        t.same(responses, ['POST', 'GET'])
         break
       case 3:
         // 1st was resent, receiving 3rd
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, method: 'POST' }), 'current should be first request')
-        t.deepEqual(responses, ['POST', 'GET', 'PUT'])
+        t.same(responses, ['POST', 'GET', 'PUT'])
         break
       case 4:
         // 2nd was resent, receiving 1st
         t.same(client.getRequestBuffer().toString(), makeResponseFromBody({ server, method: 'GET' }), 'current should be second request')
-        t.deepEqual(responses, ['POST', 'GET', 'PUT', 'POST'])
+        t.same(responses, ['POST', 'GET', 'PUT', 'POST'])
         client.destroy()
         t.end()
         break
