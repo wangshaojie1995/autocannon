@@ -62,6 +62,7 @@ Available options:
         Start the command listed after -- on the command line. When it starts listening on a port,
         start sending requests to that port. A URL is still required to send requests to
         the correct path. The hostname can be omitted, `localhost` will be used by default.
+        If the command after -- is `node <script>`, this flag is optional and assumed to be `true`.
   -m/--method METHOD
         The HTTP method to use. default: 'GET'.
   -t/--timeout NUM
@@ -559,6 +560,14 @@ Both saturates a Node.js process at around 41k req/sec, however,
 Note that `wrk` does not support HTTP/1.1 pipelining. As a result, `autocannon` can create
 more load on the server than wrk for each open connection.
 
+## Development
+
+Running the tests requires Node.js 22.15.0 or newer. After `npm install`, run
+`npm test` to lint the code and run the `node:test` suite through borp with code
+coverage. Coverage thresholds and test file patterns are configured in
+`.borp.yaml`. Use `npm run lint` to run ESLint with neostandard, or
+`npm run lint:fix` to apply automatic fixes.
+
 <a name="acknowledgements"></a>
 ## Acknowledgements
 
@@ -567,10 +576,6 @@ This project was kindly sponsored by [nearForm](http://nearform.com).
 Logo and identity designed by Cosmic Fox Design: https://www.behance.net/cosmicfox.
 
 [wrk][wrk] and [wrk2][wrk2] provided great inspiration.
-
-### Chat on Gitter
-
-If you are using autocannon or you have any questions, let us know: [Gitter](https://gitter.im/mcollina/autocannon)
 
 ### Contributors
 

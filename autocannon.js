@@ -115,6 +115,11 @@ function parseArguments (argvs) {
 
   argv.url = argv._.length > 1 ? argv._ : argv._[0]
 
+  // Assume onPort if `-- node` is provided
+  if (argv['--'][0] === 'node') {
+    argv.onPort = true
+  }
+
   if (argv.onPort) {
     argv.spawn = argv['--']
   }
@@ -288,6 +293,13 @@ function start (argv) {
         NODE_PATH: alterPath.get(),
         AUTOCANNON_SOCKET: socketPath
       })
+    })
+
+    // Do not leave the spawned server running if we are terminated:
+    // it would keep our inherited stdio open.
+    process.once('SIGTERM', () => {
+      proc.kill('SIGTERM')
+      process.exit(143)
     })
   } else {
     // if forever is true then a promise is not returned and we need to try ... catch errors
